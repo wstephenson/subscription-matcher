@@ -78,8 +78,18 @@ public class Drools {
         }
 
         // setup logging. This will not really log to the console but to slf4j which
-        // in turn delegates to log4j, see log4j.xml for configuration
-        KieRuntimeLogger kieLogger = services.getLoggers().newConsoleLogger(session);
+        // in turn delegates to log4j, see log4j.xml for configuration.
+        //
+        // PAC PoC patch: gate behind -Dmatcher.kielogger=on. The audit logger
+        // (KieRuntimeLogger) fires WorkingMemoryLogger.beforeMatchFired for
+        // every rule activation; with O(systems x subscriptions) candidate
+        // matches this OOMs around N=1000 (~1M activations) under the default
+        // 2G heap, and adds material per-activation overhead at any scale.
+        // Default off so the matcher binary is fit for production-scale input;
+        // re-enable when actually debugging Drools rule firing.
+        KieRuntimeLogger kieLogger = "on".equals(System.getProperty("matcher.kielogger"))
+            ? services.getLoggers().newConsoleLogger(session)
+            : null;
 
         // insert base facts
         for (Object fact : baseFacts) {
@@ -104,7 +114,9 @@ public class Drools {
         ;
 
         // cleanup
-        kieLogger.close();
+        if (kieLogger != null) {
+            kieLogger.close();
+        }
         session.dispose();
     }
 
