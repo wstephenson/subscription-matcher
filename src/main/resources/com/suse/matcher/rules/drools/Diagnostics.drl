@@ -1,0 +1,47 @@
+package com.suse.matcher.rules.drools;
+
+import java.util.TreeMap;
+import com.suse.matcher.facts.HostedProduct;
+import com.suse.matcher.facts.InstalledProduct;
+import com.suse.matcher.facts.Message;
+import com.suse.matcher.facts.PotentialMatch;
+import com.suse.matcher.facts.Product;
+import com.suse.matcher.facts.Subscription;
+import com.suse.matcher.facts.Subscription.Policy;
+import com.suse.matcher.facts.SubscriptionProduct;
+
+// Diagnostic rules — fire AFTER Matchability so all PotentialMatch facts
+// have been inserted; emit Message facts only (no state changes, no
+// scoring impact). The Diagnostics agenda-group is the last entry in
+// Drools.java RULE_GROUPS.
+
+// Detects: an INHERITED_VIRTUALIZATION-covered add-on product is installed
+// on a system, but no base product has a PotentialMatch for that system,
+// so matchInheritedVirtualization (Matchability.drl) cannot fire. Without
+// this rule the activation silently lands as UNSPECIFIED in downstream
+// classification because the matcher emits no diagnostic.
+rule "logInheritedVirtualizationWithoutBase"
+    agenda-group "Diagnostics"
+    when
+        $addonSub : Subscription(
+            policy == Policy.INHERITED_VIRTUALIZATION,
+            ignored == false
+        )
+        SubscriptionProduct($addonProductId : productId, subscriptionId == $addonSub.id)
+        (
+            InstalledProduct($systemId : systemId, productId == $addonProductId)
+            or
+            HostedProduct($systemId : systemId, productId == $addonProductId)
+        )
+        not (
+            Product($baseProductId : id, base == true)
+            and
+            PotentialMatch(systemId == $systemId, productId == $baseProductId)
+        )
+    then
+        TreeMap<String, String> data = new TreeMap<>();
+        data.put("system_id", String.valueOf($systemId));
+        data.put("product_id", String.valueOf($addonProductId));
+        data.put("subscription_id", String.valueOf($addonSub.getId()));
+        insert(new Message(Message.Level.WARNING, "inherited_base_not_activated", data));
+end

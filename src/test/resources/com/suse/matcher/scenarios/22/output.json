@@ -67,7 +67,16 @@
     "2": "physical_only",
     "3": "inherited_virtualization"
   },
-  "messages": [],
+  "messages": [
+    {
+      "type": "inherited_base_not_activated",
+      "data": {
+        "product_id": "1300",
+        "subscription_id": "3",
+        "system_id": "1003"
+      }
+    }
+  ],
   "subscriptions": [
     {
       "end_date": "2020-07-31T00:00:00Z",
