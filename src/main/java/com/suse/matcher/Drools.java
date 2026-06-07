@@ -37,6 +37,7 @@ public class Drools {
         "SubscriptionAggregation",
         "HardBundleConversion",
         "Matchability",
+        "Diagnostics",
     };
 
     /** Map to fact ids, see generateId(). */
