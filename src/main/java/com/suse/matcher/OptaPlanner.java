@@ -63,6 +63,11 @@ public class OptaPlanner {
         // short circuit the planning in case there's nothing to optimize
         if (unsolved.getMatches().isEmpty()) {
             result = unsolved;
+            // No demand-supply matches to optimize; trivially converged with default
+            // (0, 0) score. Without this set, the sidecar omits terminate_reason and
+            // the caller (matcher-perf pool harness) falls through to the pool's
+            // generic "exited" cause, mislabeling these runs as failures.
+            PerfRecorder.get().setTerminateReason("CONVERGED");
             return;
         }
 
