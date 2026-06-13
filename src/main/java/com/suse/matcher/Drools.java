@@ -51,6 +51,8 @@ public class Drools {
      * @param baseFacts fact objects
      */
     public Drools(Collection<Object> baseFacts) {
+        long kieStart = System.currentTimeMillis();
+
         // setup engine
         KieServices services = KieServices.Factory.get();
         KieModuleModel module = services.newKieModuleModel();
@@ -71,6 +73,8 @@ public class Drools {
 
         // start a new session
         KieSession session = services.newKieContainer(services.getRepository().getDefaultReleaseId()).newKieSession();
+
+        PerfRecorder.get().setKieContainerConstructionMs(System.currentTimeMillis() - kieStart);
 
         // set rule ordering
         Agenda agenda = session.getAgenda();
@@ -100,7 +104,9 @@ public class Drools {
         // start deduction engine
         long start = System.currentTimeMillis();
         session.fireAllRules();
-        LOGGER.info("Deduction phase took {}ms", System.currentTimeMillis() - start);
+        long ruleFiringMs = System.currentTimeMillis() - start;
+        LOGGER.info("Deduction phase took {}ms", ruleFiringMs);
+        PerfRecorder.get().setRuleFiringMs(ruleFiringMs);
 
         // collect results
         result = new ArrayList<>(session.getObjects());
