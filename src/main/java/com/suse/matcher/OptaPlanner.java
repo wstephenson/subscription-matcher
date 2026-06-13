@@ -9,8 +9,10 @@ import com.suse.matcher.solver.MatchSwapMoveIteratorFactory;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.optaplanner.core.api.score.buildin.hardsoft.HardSoftScore;
 import org.optaplanner.core.api.solver.Solver;
 import org.optaplanner.core.api.solver.SolverFactory;
+import org.optaplanner.core.api.solver.event.SolverEventListener;
 import org.optaplanner.core.config.constructionheuristic.ConstructionHeuristicPhaseConfig;
 import org.optaplanner.core.config.constructionheuristic.placer.QueuedEntityPlacerConfig;
 import org.optaplanner.core.config.heuristic.selector.common.SelectionCacheType;
@@ -65,13 +67,40 @@ public class OptaPlanner {
         }
 
         // init solver
+        long initStart = System.currentTimeMillis();
         Solver<Assignment> solver = initSolver(testing);
+        PerfRecorder.get().setSolverInitMs(System.currentTimeMillis() - initStart);
+
+        // track best-score arrival time relative to solve start
+        long[] solveStartHolder = { System.currentTimeMillis() };
+        solver.addEventListener((SolverEventListener<Assignment>) event ->
+            PerfRecorder.get().setBestScoreArrivalMs(System.currentTimeMillis() - solveStartHolder[0])
+        );
 
         // solve problem
-        long start = System.currentTimeMillis();
+        long solveStart = System.currentTimeMillis();
         solver.solve(unsolved);
-        LOGGER.info("Optimization phase took {}ms", System.currentTimeMillis() - start);
+        long solveTotalMs = System.currentTimeMillis() - solveStart;
+        LOGGER.info("Optimization phase took {}ms", solveTotalMs);
+        PerfRecorder.get().setSolveTotalMs(solveTotalMs);
+
         result = solver.getBestSolution();
+
+        // capture score and infer terminate reason
+        HardSoftScore score = (HardSoftScore) result.getScore();
+        if (score != null) {
+            PerfRecorder.get().setHardScore(score.getHardScore());
+            PerfRecorder.get().setSoftScore(score.getSoftScore());
+            if (score.getHardScore() < 0) {
+                PerfRecorder.get().setTerminateReason("INFEASIBLE");
+            }
+            else if (solveTotalMs >= 590_000L) {
+                PerfRecorder.get().setTerminateReason("TIMEOUT");
+            }
+            else {
+                PerfRecorder.get().setTerminateReason("CONVERGED");
+            }
+        }
         LOGGER.info("{} matches confirmed", result.getMatches().stream().filter(m -> m.confirmed).count());
 
         // show Penalty facts generated in Scores.drl using DroolsScoreDirector and re-calculating
@@ -244,7 +273,7 @@ public class OptaPlanner {
         TerminationConfig termination = new TerminationConfig();
         termination.setUnimprovedStepCountLimit(1000);
         termination.setStepCountLimit(15_000);
-        termination.setHoursSpentLimit(1L);
+        termination.setMillisecondsSpentLimit(600_000L);
         search.setTerminationConfig(termination);
 
         /*

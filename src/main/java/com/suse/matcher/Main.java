@@ -16,6 +16,7 @@ import org.apache.logging.log4j.core.LoggerContext;
 import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.lang.management.ManagementFactory;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -33,6 +34,9 @@ public class Main {
      */
     public static void main(String[] args) {
         long start = System.currentTimeMillis();
+        long jvmStartEpoch = ManagementFactory.getRuntimeMXBean().getStartTime();
+        PerfRecorder.get().setJvmStartupMs(start - jvmStartEpoch);
+
         CommandLine commandLine = parseCommandLine(args);
 
         // First initialize the logging system
@@ -64,17 +68,40 @@ public class Main {
                 JsonInput input = new JsonIO().loadInput(inputString);
                 Assignment assignment = new Matcher(false).match(input);
 
+                // time post-processing separately before writing output
+                long msgStart = System.currentTimeMillis();
+
                 // write output data
                 writer.writeOutput(assignment, logLevel);
 
-                logger.info("Whole execution took {}ms", System.currentTimeMillis() - start);
+                PerfRecorder.get().setMessageCollectionMs(System.currentTimeMillis() - msgStart);
+
+                long endToEndMs = System.currentTimeMillis() - start;
+                PerfRecorder.get().setEndToEndMs(endToEndMs);
+                logger.info("Whole execution took {}ms", endToEndMs);
+
+                if (commandLine.hasOption('p')) {
+                    PerfRecorder.get().writeSidecar(Path.of(commandLine.getOptionValue('p')));
+                }
             }
             catch (IOException ex) {
                 logger.error("Unexpected I/O error", ex);
+                if (commandLine.hasOption('p')) {
+                    PerfRecorder.get().setTerminateReason("ERROR");
+                    PerfRecorder.get().setEndToEndMs(System.currentTimeMillis() - start);
+                    try { PerfRecorder.get().writeSidecar(Path.of(commandLine.getOptionValue('p'))); }
+                    catch (IOException ignored) { }
+                }
                 throw new UncheckedIOException(ex);
             }
             catch (RuntimeException ex) {
                 logger.error("Unexpected error", ex);
+                if (commandLine.hasOption('p')) {
+                    PerfRecorder.get().setTerminateReason("ERROR");
+                    PerfRecorder.get().setEndToEndMs(System.currentTimeMillis() - start);
+                    try { PerfRecorder.get().writeSidecar(Path.of(commandLine.getOptionValue('p'))); }
+                    catch (IOException ignored) { }
+                }
                 throw ex;
             }
         }
@@ -90,6 +117,7 @@ public class Main {
         opts.addOption("v", "log-level", true,
                 "Log level (Default: INFO, Possible values: OFF, FATAL, ERROR, WARN, INFO, DEBUG, TRACE, ALL)");
         opts.addOption("d", "delimiter", true, "CSV Delimiter (Default: ,)");
+        opts.addOption("p", "perf-output", true, "Path for performance sidecar JSON (optional)");
 
         CommandLineParser parser = new BasicParser();
         try {
