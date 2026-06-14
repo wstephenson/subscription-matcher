@@ -44,11 +44,34 @@ import java.util.stream.Collectors;
  * Facade on the OptaPlanner solver.
  *
  * Fills a Solution object.
+ *
+ * Solver limits can be overridden at runtime via JVM system properties:
+ *   -Dmatcher.solver.timeLimitMs          (default 600000)
+ *   -Dmatcher.solver.unimprovedStepCountLimit (default 1000)
+ *   -Dmatcher.solver.selectedCountLimit   (default 10000, applies to both move types)
+ *   -Dmatcher.solver.acceptedCountLimit   (default 5000)
  */
 public class OptaPlanner {
 
     /** Logger instance. */
     private static final Logger LOGGER = LogManager.getLogger(OptaPlanner.class);
+
+    /** Wall-clock solver budget in milliseconds (configurable; defaults to 600s). */
+    private static final long TIME_LIMIT_MS =
+            longProp("matcher.solver.timeLimitMs", 600_000L);
+
+    /** TIMEOUT label threshold: budget minus 10s margin to absorb overhead. */
+    private static final long TIMEOUT_THRESHOLD_MS = TIME_LIMIT_MS - 10_000L;
+
+    private static long longProp(String name, long defaultValue) {
+        String v = System.getProperty(name);
+        return v == null ? defaultValue : Long.parseLong(v.trim());
+    }
+
+    private static int intProp(String name, int defaultValue) {
+        String v = System.getProperty(name);
+        return v == null ? defaultValue : Integer.parseInt(v.trim());
+    }
 
     /** The result. */
     private final Assignment result;
@@ -99,7 +122,7 @@ public class OptaPlanner {
             if (score.getHardScore() < 0) {
                 PerfRecorder.get().setTerminateReason("INFEASIBLE");
             }
-            else if (solveTotalMs >= 590_000L) {
+            else if (solveTotalMs >= TIMEOUT_THRESHOLD_MS) {
                 PerfRecorder.get().setTerminateReason("TIMEOUT");
             }
             else {
@@ -231,13 +254,13 @@ public class OptaPlanner {
         move.setCacheType(SelectionCacheType.JUST_IN_TIME);
         move.setSelectionOrder(SelectionOrder.RANDOM);
         move.setMoveIteratorFactoryClass(MatchMoveIteratorFactory.class);
-        move.setSelectedCountLimit(10_000L);
+        move.setSelectedCountLimit(longProp("matcher.solver.selectedCountLimit", 10_000L));
 
         MoveIteratorFactoryConfig swapMove = new MoveIteratorFactoryConfig();
         swapMove.setCacheType(SelectionCacheType.JUST_IN_TIME);
         swapMove.setSelectionOrder(SelectionOrder.RANDOM);
         swapMove.setMoveIteratorFactoryClass(MatchSwapMoveIteratorFactory.class);
-        swapMove.setSelectedCountLimit(10_000L);
+        swapMove.setSelectedCountLimit(longProp("matcher.solver.selectedCountLimit", 10_000L));
 
         /*
          * Union move uses both of the above move implementations:
@@ -264,21 +287,21 @@ public class OptaPlanner {
          * As accepted moves might still be a lot, don't evaluate more than 5_000 in any case.
          */
         LocalSearchForagerConfig forager = new LocalSearchForagerConfig();
-        forager.setAcceptedCountLimit(5_000);
+        forager.setAcceptedCountLimit(intProp("matcher.solver.acceptedCountLimit", 5_000));
         search.setForagerConfig(forager);
 
         /*
          * Continue stepping and keep track of the overall best solution found so far.
          *
          * At some point we have to stop stepping, and we do so when:
-         *   - we stepped 1000 times with no score improvement (typically)
+         *   - we stepped N times with no score improvement (typically; default 1000)
          *   - we stepped 15_000 times (when all else fails)
-         *   - we spent 1 hour finding the solution
+         *   - we spent TIME_LIMIT_MS ms finding the solution (default 600s; configurable)
          */
         TerminationConfig termination = new TerminationConfig();
-        termination.setUnimprovedStepCountLimit(1000);
+        termination.setUnimprovedStepCountLimit(intProp("matcher.solver.unimprovedStepCountLimit", 1000));
         termination.setStepCountLimit(15_000);
-        termination.setMillisecondsSpentLimit(600_000L);
+        termination.setMillisecondsSpentLimit(TIME_LIMIT_MS);
         search.setTerminationConfig(termination);
 
         /*
